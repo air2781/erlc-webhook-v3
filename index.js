@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits, ChannelType } = require("discord.js");
 const http = require("http");
 const nacl = require("tweetnacl");
 
-// ------------------- Discord Client -------------------
+// ------------------- Discord client -------------------
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("ready", () => {
@@ -12,7 +12,7 @@ client.once("ready", () => {
 
 client.login(process.env.BOT_TOKEN);
 
-// ------------------- PRP Webhook Server -------------------
+// ------------------- PRP webhook server -------------------
 const PORT = bot.port;
 const PUBLIC_KEY = Buffer.from(bot.prpPublicKey, "hex");
 
@@ -38,15 +38,19 @@ const server = http.createServer(async (req, res) => {
 
             const payload = JSON.parse(body.toString());
 
-            // Log all modcalls or commands
+            // Only log commands that start with ";"
             if (payload.type === "modcall" && payload.data?.command?.startsWith(";")) {
                 const cmd = payload.data.command;
                 const username = payload.data.username || "Unknown User";
 
                 // Send to Discord channel
-                const channel = await client.channels.fetch("1485452768406802524");
-                if (channel && channel.type === ChannelType.GuildText) {
-                    channel.send(`**Command:** ${cmd}\n**User:** ${username}`);
+                try {
+                    const channel = await client.channels.fetch("1485452768406802524");
+                    if (channel && channel.type === ChannelType.GuildText) {
+                        channel.send(`**User:** ${username}\n**Command:** ${cmd}`);
+                    }
+                } catch (err) {
+                    console.error("Failed to send message to Discord:", err);
                 }
 
                 console.log(`Logged command from ${username}: ${cmd}`);
