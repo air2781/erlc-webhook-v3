@@ -29,9 +29,7 @@ function verifyPRPSignature(signature, timestamp, body) {
 async function logToDiscord(content) {
     try {
         const channel = await client.channels.fetch(bot.discordEmbedChannelId);
-        if (!channel) return;
-
-        await channel.send(content);
+        if (channel) await channel.send(content);
     } catch (err) {
         console.error(err);
     }
@@ -42,28 +40,37 @@ const server = http.createServer((req, res) => {
 
     if (req.method === "POST") {
 
+        // ✅ RESPOND INSTANTLY (BEFORE READING BODY)
+        res.writeHead(200);
+        res.end("OK");
+
         let chunks = [];
 
         req.on("data", chunk => chunks.push(chunk));
 
         req.on("end", async () => {
-            const body = Buffer.concat(chunks);
-
-            // respond instantly (IMPORTANT)
-            res.writeHead(200);
-            res.end("OK");
-
             try {
+                const body = Buffer.concat(chunks);
+
                 const signature = req.headers["x-signature-ed25519"];
                 const timestamp = req.headers["x-signature-timestamp"];
 
+                // DEBUG
+                console.log("Headers:", {
+                    sig: !!signature,
+                    time: !!timestamp
+                });
+
+                // ✅ ONLY VERIFY IF PRESENT
                 if (signature && timestamp) {
                     const valid = verifyPRPSignature(signature, timestamp, body);
 
                     if (!valid) {
-                        console.log("Invalid signature (ignored)");
+                        console.log("❌ Invalid signature");
                         return;
                     }
+                } else {
+                    console.log("⚠️ No signature (PRP test)");
                 }
 
                 const payload = JSON.parse(body.toString());
@@ -98,14 +105,12 @@ Command: ${command}`
     }
 });
 
-// render port
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
 
-// discord
 client.once("ready", () => {
     console.log(`Bot ready as ${client.user.tag}`);
 });
