@@ -6,23 +6,39 @@ const nacl = require("tweetnacl");
 // Discord client
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// PRP public key for signature verification
-const PUBLIC_KEY = Buffer.from(bot.prpPublicKey, "base64"); // PRP gives base64 key
+// ✅ PRP public key is HEX (NOT base64)
+const PUBLIC_KEY = Buffer.from(bot.prpPublicKey, "hex");
 
-// Verify PRP signature
+// ---------------- VERIFY SIGNATURE ----------------
 function verifyPRPSignature(signature, timestamp, body) {
-    const sig = Buffer.from(signature, "hex");
-    const message = Buffer.concat([Buffer.from(timestamp, "utf8"), body]);
-    return nacl.sign.detached.verify(message, sig, PUBLIC_KEY);
+    try {
+        if (!signature || !timestamp) return false;
+
+        const sig = Buffer.from(signature, "hex");
+        const msg = Buffer.concat([
+            Buffer.from(timestamp, "utf8"),
+            body
+        ]);
+
+        return nacl.sign.detached.verify(msg, sig, PUBLIC_KEY);
+    } catch {
+        return false;
+    }
 }
 
-// Log to Discord channel
+// ---------------- LOG TO DISCORD ----------------
 async function logToDiscord(content) {
-    const channel = await client.channels.fetch(bot.discordEmbedChannelId);
-    if (!channel) return console.log("Channel not found");
-    channel.send(content).catch(console.error);
+    try {
+        const channel = await client.channels.fetch(bot.discordEmbedChannelId);
+        if (!channel) return console.log("Channel not found");
+
+        await channel.send(content);
+    } catch (err) {
+        console.error("Discord log error:", err);
+    }
 }
 
+// ---------------- WEBHOOK SERVER ----------------
 const server = http.createServer((req, res) => {
     if (req.method === "POST" && req.url === "/event-webhook") {
         let chunks = [];
@@ -32,22 +48,19 @@ const server = http.createServer((req, res) => {
         req.on("end", () => {
             const body = Buffer.concat(chunks);
 
-            // ✅ RESPOND IMMEDIATELY (THIS FIXES PRP SAVING)
+            // ✅ ALWAYS RESPOND IMMEDIATELY (required by PRP)
             res.writeHead(200);
             res.end("OK");
 
-            // Everything below runs AFTER response
             (async () => {
                 try {
                     const signature = req.headers["x-signature-ed25519"];
                     const timestamp = req.headers["x-signature-timestamp"];
 
-                    // Optional verification (non-blocking)
-                    if (signature && timestamp) {
-                        const valid = verifyPRPSignature(signature, timestamp, body);
-                        if (!valid) {
-                            console.log("Invalid signature (ignored)");
-                        }
+                    // ✅ STRICT SIGNATURE CHECK
+                    if (!verifyPRPSignature(signature, timestamp, body)) {
+                        console.log("❌ Invalid signature - request ignored");
+                        return;
                     }
 
                     const payload = JSON.parse(body.toString());
@@ -65,7 +78,10 @@ const server = http.createServer((req, res) => {
                     }
 
                     if (command && command.startsWith(";")) {
-                        const logMessage = `User: ${username}\nCommand: ${command}`;
+                        const logMessage =
+`User: ${username}
+Command: ${command}`;
+
                         await logToDiscord(logMessage);
                         console.log(`Logged: ${username} -> ${command}`);
                     }
@@ -77,19 +93,21 @@ const server = http.createServer((req, res) => {
         });
 
     } else {
-        res.writeHead(200); // also important: don't 404 root
+        // ✅ prevent 404 (PRP requires valid response)
+        res.writeHead(200);
         res.end("OK");
     }
 });
 
+// ---------------- START SERVER ----------------
 server.listen(bot.port, () => {
     console.log(`Webhook server listening on port ${bot.port}`);
 });
 
-// Discord bot ready
+// ---------------- DISCORD READY ----------------
 client.once("ready", () => {
     console.log(`Discord bot ready as ${client.user.tag}`);
 });
 
-// Login Discord bot
+// ---------------- LOGIN ----------------
 client.login(bot.token);
